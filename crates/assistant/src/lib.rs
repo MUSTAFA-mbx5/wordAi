@@ -1,6 +1,6 @@
 //! WordCraft assistant.
 //!
-//! A conversational agent that carries out writing requests ("draft an introduction", "rewrite
+//! WordCraft AI, a bilingual Arabic/English conversational agent that carries out writing requests ("draft an introduction", "rewrite
 //! this paragraph", "turn these lines into a table") with WordCraft's own commands. The model
 //! comes from the host as a [`Provider`] that takes chat-completions requests; the agent's tools
 //! are the MCP tools of `wordcraft-mcp`, run against any [`wordcraft_mcp::Backend`] (a headless
