@@ -5870,6 +5870,7 @@ dependencies = [
  "rustls",
  "rustls-pki-types",
  "rustls-platform-verifier",
+ "serde_json",
  "ureq-proto",
  "utf8-zero",
  "webpki-roots",
