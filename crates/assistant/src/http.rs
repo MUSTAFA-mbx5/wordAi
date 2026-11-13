@@ -251,6 +251,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn requires_a_model_and_credential() {
+        let missing_key = HttpProvider::new(ProviderConfig {
+            kind: ProviderKind::OpenAi,
+            endpoint: None,
+            model: "gpt-model".into(),
+            api_key: "  ".into(),
+        });
+        assert!(missing_key.is_err());
+
+        let missing_model = HttpProvider::new(ProviderConfig {
+            kind: ProviderKind::Gemini,
+            endpoint: None,
+            model: " ".into(),
+            api_key: "secret".into(),
+        });
+        assert!(missing_model.is_err());
+    }
+
+    #[test]
     fn rejects_clear_text_remote_endpoints() {
         assert!(validate_endpoint("http://example.com/v1").is_err());
         assert!(validate_endpoint("http://localhost:1234/v1").is_ok());
