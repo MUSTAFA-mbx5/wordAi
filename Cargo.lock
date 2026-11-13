@@ -7033,6 +7033,8 @@ dependencies = [
  "wordcraft-doc",
  "wordcraft-engine",
  "wordcraft-mcp",
+ "ureq",
+ "zeroize",
 ]
 
 [[package]]
