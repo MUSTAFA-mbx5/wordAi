@@ -145,45 +145,23 @@ fn to_anthropic_request(request: &Value, model: &str) -> Result<Value, String> {
     let mut system_parts = Vec::new();
     let mut converted = Vec::new();
     for message in messages {
-        let role = message.get("role").and_then(Value::as_str).unwrap_or_default();
-        let content = message.get("content").and_then(Value::as_str).unwrap_or_default();
-        match role {
+        match message.get("role").and_then(Value::as_str).unwrap_or_default() {
             "system" | "developer" => {
-                if !content.is_empty() {
+                if let Some(content) = message.get("content").and_then(Value::as_str).filter(|s| !s.is_empty()) {
                     system_parts.push(content.to_string());
                 }
             }
-            "tool" => {
-                let tool_use_id = message.get("tool_call_id").and_then(Value::as_str)
-                    .ok_or_else(|| "tool result is missing tool_call_id".to_string())?;
-                converted.push(json!({
-                    "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": tool_use_id, "content": content}]
-                }));
+            "tool" => converted.push(anthropic_tool_result(message)?),
+            "user" => {
+                let content = message.get("content").and_then(Value::as_str).unwrap_or_default();
+                converted.push(json!({"role": "user", "content": content}));
             }
-            "user" => converted.push(json!({"role": "user", "content": content})),
             "assistant" => {
-                let mut blocks = Vec::new();
-                if !content.is_empty() {
-                    blocks.push(json!({"type": "text", "text": content}));
-                }
-                if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
-                    for call in calls {
-                        let id = call.get("id").and_then(Value::as_str)
-                            .ok_or_else(|| "assistant tool call is missing its id".to_string())?;
-                        let name = call.pointer("/function/name").and_then(Value::as_str)
-                            .ok_or_else(|| "assistant tool call is missing its function name".to_string())?;
-                        let raw = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
-                        let input: Value = serde_json::from_str(raw)
-                            .map_err(|error| format!("invalid tool arguments: {error}"))?;
-                        blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
-                    }
-                }
-                if !blocks.is_empty() {
-                    converted.push(json!({"role": "assistant", "content": blocks}));
+                if let Some(message) = anthropic_assistant_message(message)? {
+                    converted.push(message);
                 }
             }
-            _ => return Err(format!("unsupported message role: {role}")),
+            role => return Err(format!("unsupported message role: {role}")),
         }
     }
     let mut body = json!({"model": model, "messages": converted, "max_tokens": 4096});
@@ -191,20 +169,49 @@ fn to_anthropic_request(request: &Value, model: &str) -> Result<Value, String> {
         body["system"] = json!(system_parts.join("\n\n"));
     }
     if let Some(tools) = request.get("tools").and_then(Value::as_array) {
-        let mut converted_tools = Vec::new();
-        for tool in tools {
-            let function = tool.get("function").unwrap_or(tool);
-            let name = function.get("name").and_then(Value::as_str)
-                .ok_or_else(|| "tool definition is missing its name".to_string())?;
-            let description = function.get("description").and_then(Value::as_str).unwrap_or("");
-            let schema = function.get("parameters").cloned().unwrap_or_else(|| json!({"type":"object","properties":{}}));
-            converted_tools.push(json!({"name": name, "description": description, "input_schema": schema}));
-        }
+        let converted_tools = tools.iter().map(anthropic_tool_definition).collect::<Result<Vec<_>, _>>()?;
         if !converted_tools.is_empty() {
             body["tools"] = Value::Array(converted_tools);
         }
     }
     Ok(body)
+}
+
+fn anthropic_tool_result(message: &Value) -> Result<Value, String> {
+    let id = message.get("tool_call_id").and_then(Value::as_str)
+        .ok_or_else(|| "tool result is missing tool_call_id".to_string())?;
+    let content = message.get("content").and_then(Value::as_str).unwrap_or_default();
+    Ok(json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": id, "content": content}]}))
+}
+
+fn anthropic_assistant_message(message: &Value) -> Result<Option<Value>, String> {
+    let mut blocks = Vec::new();
+    if let Some(content) = message.get("content").and_then(Value::as_str).filter(|s| !s.is_empty()) {
+        blocks.push(json!({"type": "text", "text": content}));
+    }
+    if let Some(calls) = message.get("tool_calls").and_then(Value::as_array) {
+        for call in calls {
+            let id = call.get("id").and_then(Value::as_str)
+                .ok_or_else(|| "assistant tool call is missing its id".to_string())?;
+            let name = call.pointer("/function/name").and_then(Value::as_str)
+                .ok_or_else(|| "assistant tool call is missing its function name".to_string())?;
+            let raw = call.pointer("/function/arguments").and_then(Value::as_str).unwrap_or("{}");
+            let input: Value = serde_json::from_str(raw)
+                .map_err(|error| format!("invalid tool arguments: {error}"))?;
+            blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
+        }
+    }
+    Ok((!blocks.is_empty()).then(|| json!({"role": "assistant", "content": blocks})))
+}
+
+fn anthropic_tool_definition(tool: &Value) -> Result<Value, String> {
+    let function = tool.get("function").unwrap_or(tool);
+    let name = function.get("name").and_then(Value::as_str)
+        .ok_or_else(|| "tool definition is missing its name".to_string())?;
+    let description = function.get("description").and_then(Value::as_str).unwrap_or("");
+    let schema = function.get("parameters").cloned()
+        .unwrap_or_else(|| json!({"type": "object", "properties": {}}));
+    Ok(json!({"name": name, "description": description, "input_schema": schema}))
 }
 
 /// Normalize Anthropic's content blocks to the response shape consumed by the agent.
