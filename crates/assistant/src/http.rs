@@ -68,16 +68,17 @@ impl HttpProvider {
     }
 
     fn send(&self, body: &Value) -> Result<Value, String> {
-        let mut request = ureq::post(&self.endpoint);
-        request = match self.kind {
+        let request = self.agent.post(&self.endpoint);
+        let response = match self.kind {
             ProviderKind::Anthropic => request
                 .header("x-api-key", self.api_key.as_str())
-                .header("anthropic-version", "2023-06-01"),
-            _ => request.header("Authorization", &format!("Bearer {}", self.api_key.as_str())),
-        };
-        let response = request
-            .header("Content-Type", "application/json")
-            .send_json(body)
+                .header("anthropic-version", "2023-06-01")
+                .send_json(body),
+            _ => {
+                let authorization = format!("Bearer {}", self.api_key.as_str());
+                request.header("Authorization", &authorization).send_json(body)
+            }
+        }
             .map_err(|error| format!("model provider request failed: {error}"))?;
         response.into_body().read_json::<Value>()
             .map_err(|error| format!("model provider returned invalid JSON: {error}"))
@@ -116,8 +117,9 @@ fn validate_endpoint(endpoint: &str) -> Result<(), String> {
         rest
     } else if let Some(rest) = endpoint.strip_prefix("http://") {
         let host = rest.split('/').next().unwrap_or_default();
-        let host = host.split(':').next().unwrap_or_default();
-        if !matches!(host, "localhost" | "127.0.0.1" | "[::1]") {
+        let local = host == "localhost" || host.starts_with("localhost:")
+            || host == "127.0.0.1" || host.starts_with("127.0.0.1:") || host.starts_with("[::1]");
+        if !local {
             return Err("API endpoints must use HTTPS (HTTP is allowed only for localhost)".into());
         }
         rest
