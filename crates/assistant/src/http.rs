@@ -3,6 +3,8 @@
 //! Credentials are supplied by the desktop host (which is responsible for secure persistence).
 //! This crate keeps its in-memory copy in a zeroizing buffer and never logs request headers.
 
+use std::time::Duration;
+
 use serde_json::{Map, Value, json};
 use zeroize::Zeroizing;
 
@@ -63,7 +65,10 @@ impl HttpProvider {
             endpoint,
             model: config.model,
             api_key: Zeroizing::new(config.api_key),
-            agent: ureq::Agent::new_with_defaults(),
+            agent: ureq::Agent::config_builder()
+                .timeout_global(Some(Duration::from_secs(120)))
+                .build()
+                .new_agent(),
         })
     }
 
